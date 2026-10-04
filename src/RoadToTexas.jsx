@@ -28,11 +28,73 @@ const SCHEDULE = {
   },
 };
 
-// === MILESTONES === one-off items. date: null shows as TBD in the list; set { y, m, d } to pin it to a calendar day.
-const MILESTONES = [
-  { date: null, title: 'New bike + fitting', type: 'Cycling', detail: 'Get the fit dialed before long outdoor rides' },
-  { date: null, title: 'OWS trial swim', type: 'Swim', detail: 'Test the before-work bay swim' },
-];
+// === MILESTONES === optional dated one-offs. Add { date: { y, m, d }, title, type, detail } to pin a gold card to that day.
+const MILESTONES = [];
+
+// Original katana drawn in a 1000 x 140 box, tip pointing right, centred on y=70.
+function Katana({ x, y, rotate = 0, scale = 1, flip = false }) {
+  const diamonds = Array.from({ length: 9 }, (_, i) => 78 + i * 22);
+  // stylised hamon (temper line): gentle zigzag following the blade's curve
+  const q = (a, b, c, t) => (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
+  const hamon = Array.from({ length: 29 }, (_, i) => {
+    const t = i / 28;
+    return `${i === 0 ? 'M' : 'L'} ${q(318, 660, 990, t).toFixed(1)} ${(q(74, 62, 42, t) + (i % 2 ? 2.5 : -2.5)).toFixed(1)}`;
+  }).join(' ');
+  return (
+    <g transform={`translate(${x} ${y}) rotate(${rotate}) scale(${flip ? -scale : scale} ${scale}) translate(-500 -70)`}>
+      {/* kashira (pommel) */}
+      <rect x="40" y="52" width="14" height="36" rx="4" fill="#1b2238" stroke="url(#gold)" strokeWidth="1.5" />
+      {/* tsuka (handle) with red ito wrap */}
+      <rect x="54" y="55" width="222" height="30" rx="6" fill="#262c42" />
+      {diamonds.map(cx => (
+        <polygon key={cx} points={`${cx},57 ${cx + 11},70 ${cx},83 ${cx - 11},70`} fill="#c8102e" opacity="0.9" />
+      ))}
+      {diamonds.map(cx => (
+        <line key={`l${cx}`} x1={cx - 11} y1="55" x2={cx + 11} y2="85" stroke="#0b0f1e" strokeWidth="2" />
+      ))}
+      {/* tsuba (guard) */}
+      <ellipse cx="284" cy="70" rx="9" ry="34" fill="#121829" stroke="url(#gold)" strokeWidth="2" />
+      {/* habaki (collar) */}
+      <rect x="293" y="56" width="22" height="28" fill="url(#gold)" />
+      {/* blade with sori (curve) and kissaki (tip) */}
+      <path d="M 315 54 Q 660 30 990 32 L 1000 44 Q 660 60 315 86 Z" fill="url(#steel)" />
+      {/* shinogi (ridge line) */}
+      <path d="M 315 64 Q 660 44 992 36" stroke="rgba(255,255,255,0.45)" strokeWidth="1.2" fill="none" />
+      {/* hamon */}
+      <path d={hamon} stroke="rgba(255,255,255,0.55)" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
+    </g>
+  );
+}
+
+function KatanaBackdrop() {
+  return (
+    <div className="katana-bg" aria-hidden="true">
+      <svg viewBox="0 0 1000 700" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
+        <defs>
+          <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#e4eaf7" />
+            <stop offset="0.42" stopColor="#8c9ab6" />
+            <stop offset="0.5" stopColor="#f3f6fc" />
+            <stop offset="1" stopColor="#5a688a" />
+          </linearGradient>
+          <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#f1d27a" />
+            <stop offset="1" stopColor="#9c7a1c" />
+          </linearGradient>
+          <filter id="kglow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="14" result="b" />
+            <feColorMatrix in="b" type="matrix" values="0 0 0 0 0.35  0 0 0 0 0.56  0 0 0 0 0.83  0 0 0 0.9 0" result="c" />
+            <feMerge><feMergeNode in="c" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        <g filter="url(#kglow)">
+          <Katana x={500} y={350} rotate={-30} scale={0.8} />
+          <Katana x={500} y={350} rotate={30} scale={0.8} flip />
+        </g>
+      </svg>
+    </div>
+  );
+}
 
 export default function RoadToTexasSite() {
   const [mounted, setMounted] = useState(false);
@@ -362,10 +424,8 @@ export default function RoadToTexasSite() {
   };
 
   const milestonesOn = (dayNum) => MILESTONES.filter(m => m.date && dayNumFromYMD(m.date.y, m.date.m, m.date.d) === dayNum);
-  const formatMilestoneDate = (m) => m.date ? formatDayNum(dayNumFromYMD(m.date.y, m.date.m, m.date.d)) : 'TBD';
 
   const maxHours = Math.max(...plan.map(w => w.hours), 1);
-  const maxRunMi = Math.max(...plan.map(w => w.runMi), 1);
   const TEXAS_RED = '#c8102e';
 
   return (
@@ -435,6 +495,22 @@ export default function RoadToTexasSite() {
           font-weight: 700; animation: todayPulse 2s infinite; border-radius: 2px;
         }
 
+        @keyframes katanaFloat {
+          0%, 100% { transform: translateY(-50%) translateX(0); }
+          50% { transform: translateY(calc(-50% - 10px)) translateX(4px); }
+        }
+        .katana-bg {
+          position: absolute; top: 50%; right: -2%;
+          width: min(1050px, 78vw); aspect-ratio: 10 / 7;
+          opacity: 0.26; pointer-events: none; z-index: 1;
+          animation: katanaFloat 9s ease-in-out infinite;
+          -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 22%, #000 100%);
+          mask-image: linear-gradient(90deg, transparent 0%, #000 22%, #000 100%);
+        }
+        @media (max-width: 768px) {
+          .katana-bg { width: 125vw; right: -32vw; top: 56%; opacity: 0.14; }
+        }
+
         .day-col.free-day { background: rgba(90, 143, 212, 0.05); }
         .day-col.work-day { background: #050814; }
         .day-col.heavy-day { background: rgba(5, 8, 20, 1); }
@@ -467,11 +543,6 @@ export default function RoadToTexasSite() {
         }
         .workout-card.optional { border-style: dashed !important; opacity: 0.7; }
         .milestone-card { border-left-color: #ffd700 !important; background: rgba(255, 215, 0, 0.06) !important; }
-        .milestone-row {
-          display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center;
-          padding: 14px 18px; margin-bottom: 28px;
-          border: 1px solid rgba(255, 215, 0, 0.25); background: rgba(255, 215, 0, 0.04);
-        }
 
         /* ========== MOBILE RESPONSIVE ========== */
         .nav-bar { padding: 20px 40px; }
@@ -609,6 +680,8 @@ export default function RoadToTexasSite() {
           background: `radial-gradient(circle, rgba(200, 16, 46, 0.15) 0%, transparent 60%)`,
           filter: 'blur(60px)', pointerEvents: 'none',
         }} />
+
+        <KatanaBackdrop />
 
         <div style={{ maxWidth: '1400px', margin: '0 auto', width: '100%', position: 'relative', zIndex: 2 }}>
           <div style={{
@@ -780,22 +853,6 @@ export default function RoadToTexasSite() {
             style={{ width: '100%', marginBottom: '20px', accentColor: '#5a8fd4' }}
           />
 
-          {MILESTONES.length > 0 && (
-            <div className="milestone-row">
-              <span style={{
-                fontFamily: "'JetBrains Mono', monospace", fontSize: '9px',
-                letterSpacing: '0.2em', color: GOLD, textTransform: 'uppercase', fontWeight: 700,
-              }}>Milestones</span>
-              {MILESTONES.map((m, i) => (
-                <span key={i} style={{ fontFamily: "'Archivo', sans-serif", fontSize: '12px', color: 'rgba(245, 247, 255, 0.75)' }}>
-                  <span style={{ color: workoutTypeColor(m.type), fontWeight: 600 }}>{m.title}</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: 'rgba(245, 247, 255, 0.45)', marginLeft: '8px' }}>
-                    {formatMilestoneDate(m)}
-                  </span>
-                </span>
-              ))}
-            </div>
-          )}
 
           <div className="calendar-grid" style={{
             background: 'rgba(90, 143, 212, 0.15)',
@@ -933,10 +990,6 @@ export default function RoadToTexasSite() {
               </div>
             ))}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '14px', height: '14px', background: GOLD }} />
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', letterSpacing: '0.15em', color: 'rgba(245, 247, 255, 0.6)', textTransform: 'uppercase' }}>Milestone</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '14px', height: '14px', border: '1px dashed rgba(90, 143, 212, 0.6)' }} />
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', letterSpacing: '0.15em', color: 'rgba(245, 247, 255, 0.6)', textTransform: 'uppercase' }}>Optional · not counted</span>
             </div>
@@ -1072,21 +1125,16 @@ export default function RoadToTexasSite() {
                       flex: 1, minWidth: '6px', height: '100%',
                       display: 'flex', alignItems: 'flex-end', gap: '1px',
                     }}
-                    title={`Week ${w.weekNum} · ${w.phase} · ${w.hours}h · run ${w.runMi} mi${isCurrent ? ' · THIS WEEK' : ''}`}
+                    title={`Week ${w.weekNum} · ${w.phase} · ${w.hours}h${isCurrent ? ' · THIS WEEK' : ''}`}
                   >
                     <div style={{
-                      flex: 2,
+                      flex: 1,
                       height: `${(w.hours / maxHours) * 100}%`, minHeight: '6px',
                       background: isSelected ? '#5a8fd4' : phaseColor(w.phase),
                       opacity: isSelected ? 1 : (isCurrent ? 0.9 : 0.55),
                       border: isSelected
                         ? '2px solid #f5f7ff'
                         : (isCurrent ? `2px solid ${TEXAS_RED}` : 'none'),
-                    }} />
-                    <div style={{
-                      flex: 1,
-                      height: `${(w.runMi / maxRunMi) * 100}%`, minHeight: '3px',
-                      background: TEXAS_RED, opacity: isSelected ? 1 : 0.7,
                     }} />
                   </div>
                 );
@@ -1111,13 +1159,6 @@ export default function RoadToTexasSite() {
                   fontFamily: "'JetBrains Mono', monospace", fontSize: '10px',
                   letterSpacing: '0.15em', color: TEXAS_RED,
                 }}>THIS WEEK</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ width: '6px', height: '14px', background: TEXAS_RED, opacity: 0.7 }} />
-                <span style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: '10px',
-                  letterSpacing: '0.15em', color: 'rgba(245, 247, 255, 0.6)',
-                }}>RUN MILES (thin bar)</span>
               </div>
             </div>
           </div>
