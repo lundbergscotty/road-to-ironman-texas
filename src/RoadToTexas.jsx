@@ -246,8 +246,8 @@ export default function RoadToTexasSite() {
     if (phase === 'PEAK') {
       return [
         [R({ title: 'Long run · race rehearsal', duration: 160, distance: '17 mi', slot: 'AM', detail: 'Zone 2 · full race nutrition · last 30 min at IM pace' }),
-         S({ title: 'OPTIONAL easy OWS', duration: 40, distance: '1800m', slot: 'PM', optional: true, tag: 'OWS', detail: 'Flush the legs · easy continuous' })],
-        [C({ title: 'Long ride · IM power', duration: 240, distance: '75 mi', slot: 'AM', detail: '3x40 min at IM power · full nutrition rehearsal · race kit' }),
+         C({ title: 'Kickr spin', duration: 90, distance: '27 mi', slot: 'PM', tag: 'Kickr', detail: 'Zone 2 · flush the long run · nutrition top-up' })],
+        [C({ title: 'Long ride · IM power', duration: 300, distance: '95 mi', slot: 'AM', detail: '3x50 min at IM power · full nutrition rehearsal · race kit' }),
          R({ title: 'Brick run · IM pace', duration: 50, distance: '6 mi', slot: 'AM', tag: 'Brick', system: 'Anaerobic', detail: 'Hold form on tired legs · even splits' }),
          ST({ title: 'Stability + mobility', duration: 20, slot: 'PM', detail: 'Hip abductors · calf raises · single-leg balance · no plyos' })],
         [S({ title: 'Race-pace swim', duration: 60, distance: '2800m', slot: 'AM', tag: 'EOS / OWS', detail: '3x800 at race pace · sighting · wetsuit if OWS' })],
@@ -277,8 +277,8 @@ export default function RoadToTexasSite() {
     if (phase === 'BUILD') {
       return [
         [R({ title: 'Long run · fast finish', duration: 120, distance: '13 mi', slot: 'AM', detail: 'Zone 2 · last 20 min at IM pace · soft surface · nutrition practice' }),
-         S({ title: 'OPTIONAL easy OWS', duration: 40, distance: '1800m', slot: 'PM', optional: true, tag: 'OWS', detail: 'Easy continuous · skip if legs are flat' })],
-        [C({ title: 'Long ride · IM blocks', duration: 180, distance: '55 mi', slot: 'AM', tag: 'Kickr OK', detail: 'Zone 2 · 3x20 min at IM power · race nutrition' }),
+         C({ title: 'Kickr spin', duration: 75, distance: '22 mi', slot: 'PM', tag: 'Kickr', detail: 'Zone 2 · flush the long run · nutrition top-up' })],
+        [C({ title: 'Long ride · IM blocks', duration: 210, distance: '65 mi', slot: 'AM', tag: 'Kickr OK', detail: 'Zone 2 · 3x25 min at IM power · race nutrition' }),
          R({ title: 'Brick run · IM pace', duration: 30, distance: '3.5 mi', slot: 'AM', tag: 'Brick', system: 'Anaerobic', detail: 'Right off the bike · IM pace · quick feet' }),
          ST({ title: 'Stability + mobility', duration: 25, slot: 'PM', detail: 'Hip abductors · calf · single-leg balance · no plyos' })],
         [S({ title: 'Aerobic swim', duration: 60, distance: '2400m', slot: 'AM', tag: 'EOS / OWS', detail: '4x400 aerobic · pull + paddles · sighting if OWS' })],
