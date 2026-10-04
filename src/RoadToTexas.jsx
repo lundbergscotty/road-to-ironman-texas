@@ -9,7 +9,6 @@ const ATHLETE = {
   raceDay:   { y: 2027, m: 3, d: 24 },  // Sat Apr 24, 2027
   raceLabel: 'IRONMAN TEXAS · APRIL 24, 2027',
   established: 'Est. October 2026',
-  runCue: 'Left-right balance check',   // shown on every run card
 };
 
 // === SCHEDULE CONFIG ===
@@ -537,10 +536,6 @@ export default function RoadToTexasSite() {
           font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.08em;
           background: rgba(255, 215, 0, 0.1); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.35);
         }
-        .run-cue {
-          margin-top: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px;
-          letter-spacing: 0.08em; color: #e07a8a; text-transform: uppercase;
-        }
         .workout-card.optional { border-style: dashed !important; opacity: 0.7; }
         .milestone-card { border-left-color: #ffd700 !important; background: rgba(255, 215, 0, 0.06) !important; }
 
@@ -966,7 +961,6 @@ export default function RoadToTexasSite() {
                             {w.detail}
                           </div>
                           {w.tag && <span className="tag-chip">{w.tag}</span>}
-                          {w.type === 'Run' && ATHLETE.runCue && <div className="run-cue">↔ {ATHLETE.runCue}</div>}
                         </div>
                       );
                     })}
