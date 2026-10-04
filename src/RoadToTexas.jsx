@@ -601,12 +601,20 @@ export default function RoadToTexasSite() {
           }
           .hero-btns button { width: 100%; }
 
-          /* Calendar week header buttons stack vertically */
+          /* Calendar week header: title on top, Prev / Next side by side underneath */
           .cal-header-row {
-            flex-direction: column;
+            flex-direction: row;
+            flex-wrap: wrap;
             gap: 12px;
           }
-          .cal-header-row button { width: 100%; }
+          .cal-header-row > div { flex: 1 1 100% !important; order: 1; }
+          .cal-header-row > button {
+            flex: 1 1 0; order: 2; min-width: 0; min-height: 44px;
+            padding: 12px 8px !important; font-size: 10px !important;
+          }
+
+          /* Bigger tap targets in the nav */
+          .nav-bar .nav-link { padding: 12px 4px; }
 
           /* Shorter week bar chart on mobile */
           .week-bars-row { height: 120px !important; }
