@@ -4,12 +4,35 @@ import React, { useState, useEffect, useMemo } from 'react';
 const ATHLETE = {
   firstName: 'Aiden',
   lastName: 'Matano',
-  brand: 'MATANO',                 // nav + footer wordmark
-  planStart: { y: 2026, m: 9, d: 5 },   // Mon Oct 5, 2026  (m is 0-indexed)
+  brand: 'MATANO',                      // nav + footer wordmark
+  planStart: { y: 2026, m: 9, d: 5 },   // Mon Oct 5, 2026 (m is 0-indexed). Snaps back to the week start below.
   raceDay:   { y: 2027, m: 3, d: 24 },  // Sat Apr 24, 2027
   raceLabel: 'IRONMAN TEXAS · APRIL 24, 2027',
   established: 'Est. October 2026',
+  runCue: 'Left-right balance check',   // shown on every run card
 };
+
+// === SCHEDULE CONFIG ===
+// Weekdays are 0=Sun … 6=Sat. caps = max minutes available in that window (0 = no window).
+const SCHEDULE = {
+  weekStartsOn: 0,                        // calendar week starts Sunday so the two free days lead
+  slotTimes: { AM: '5:45', PM: '7:30' },
+  days: {
+    0: { label: 'Free',        work: false, heavy: false, caps: { AM: 240, PM: 90 } },
+    1: { label: 'Free',        work: false, heavy: false, caps: { AM: 360, PM: 60 } },
+    2: { label: 'Work',        work: true,  heavy: false, caps: { AM: 60,  PM: 0 } },
+    3: { label: 'Work',        work: true,  heavy: false, caps: { AM: 0,   PM: 90 } },
+    4: { label: 'Heavy work',  work: true,  heavy: true,  caps: { AM: 45,  PM: 0 } },
+    5: { label: 'Heavy work',  work: true,  heavy: true,  caps: { AM: 0,   PM: 45 } },
+    6: { label: 'Early leave', work: true,  heavy: false, caps: { AM: 0,   PM: 120 } },
+  },
+};
+
+// === MILESTONES === one-off items. date: null shows as TBD in the list; set { y, m, d } to pin it to a calendar day.
+const MILESTONES = [
+  { date: null, title: 'New bike + fitting', type: 'Cycling', detail: 'Get the fit dialed before long outdoor rides' },
+  { date: null, title: 'OWS trial swim', type: 'Swim', detail: 'Test the before-work bay swim' },
+];
 
 export default function RoadToTexasSite() {
   const [mounted, setMounted] = useState(false);
@@ -22,6 +45,8 @@ export default function RoadToTexasSite() {
   // Every date is a "day number" = Math.floor(UTC-ms / 86400000).
   // This avoids every timezone and DST bug.
   const dayNumFromYMD = (y, m, d) => Math.floor(Date.UTC(y, m, d) / 86400000);
+  // Weekday of a day number, 0=Sun … 6=Sat (day 0 = Thu Jan 1, 1970)
+  const weekdayOf = (dayNum) => ((dayNum + 4) % 7 + 7) % 7;
 
   // Convert a real Date (from Date.now()) to a day number in LOCAL time
   const dayNumFromNow = () => {
@@ -47,7 +72,9 @@ export default function RoadToTexasSite() {
     return `${monthNames[m]} ${d}, ${String(y).slice(-2)}`;
   };
 
-  const PLAN_START_DAY = dayNumFromYMD(ATHLETE.planStart.y, ATHLETE.planStart.m, ATHLETE.planStart.d);
+  // Snap the configured start back to the configured week-start day so week 1 is a full calendar week
+  const rawPlanStart = dayNumFromYMD(ATHLETE.planStart.y, ATHLETE.planStart.m, ATHLETE.planStart.d);
+  const PLAN_START_DAY = rawPlanStart - ((weekdayOf(rawPlanStart) - SCHEDULE.weekStartsOn + 7) % 7);
   const RACE_DAY_NUM = dayNumFromYMD(ATHLETE.raceDay.y, ATHLETE.raceDay.m, ATHLETE.raceDay.d);
 
   const quotes = [
@@ -92,112 +119,131 @@ export default function RoadToTexasSite() {
     return () => clearInterval(id);
   }, []);
 
-  const getPhase = (weeksUntilRace) => {
+  const getPhase = (weeksUntilRace, weekIndex) => {
     if (weeksUntilRace === 0) return 'RACE WEEK';
     if (weeksUntilRace <= 2) return 'TAPER';
     if (weeksUntilRace <= 4) return 'PEAK';
-    if (weeksUntilRace <= 12) return (weeksUntilRace - 4) % 4 === 0 ? 'RECOVERY' : 'BUILD';
-    if (weeksUntilRace <= 24) return (weeksUntilRace - 12) % 4 === 0 ? 'RECOVERY' : 'BUILD';
-    if (weeksUntilRace <= 40) return (weeksUntilRace - 24) % 4 === 0 ? 'RECOVERY' : 'BASE';
+    // 3 weeks on / 1 recovery, counted from plan start so week 1 is never a recovery week
+    if (weekIndex % 4 === 3) return 'RECOVERY';
+    if (weeksUntilRace <= 12) return 'BUILD';
+    if (weeksUntilRace <= 40) return 'BASE';
     return 'FOUNDATION';
   };
 
   const getPhaseDetail = (phase) => {
     const details = {
       'FOUNDATION': 'Prep · consistency',
-      'BASE': 'Aerobic base building',
-      'BUILD': 'Specific prep · threshold work',
-      'PEAK': 'Final big weeks',
-      'TAPER': 'Sharpen · reduce · rest',
+      'BASE': 'Aerobic base · bricks begin',
+      'BUILD': 'IM-specific · two bricks a week',
+      'PEAK': 'Biggest Sun–Mon blocks',
+      'TAPER': 'Sharpen · no plyos · rest',
       'RACE WEEK': 'Texas · April 24',
       'RECOVERY': 'Absorb · adapt · deload',
     };
     return details[phase] || '';
   };
 
+  // Templates are indexed 0=Sun … 6=Sat to match SCHEDULE.
+  // Each workout: type, title, duration (min), distance, system, slot (AM/PM), detail, optional tag / optional flag.
   const generateDayWorkouts = (phase, weeksUntilRace, dayOfWeek) => {
+    const R = (o) => ({ type: 'Run', system: 'Aerobic', ...o });
+    const C = (o) => ({ type: 'Cycling', system: 'Aerobic', ...o });
+    const S = (o) => ({ type: 'Swim', system: 'Aerobic', ...o });
+    const ST = (o) => ({ type: 'Strength', system: 'Aerobic', distance: '', ...o });
+    const OFF = (title, detail) => ({ type: 'Other', title, duration: 0, distance: '', system: 'Rest', slot: 'AM', detail });
+
     if (phase === 'RACE WEEK') {
-      const raceWeek = [
-        [{ type: 'Run', title: 'Pre-race impulse running', duration: 40, distance: '4 mi', system: 'Aerobic', detail: 'Race Week · Mon · shake-out, easy pace' }],
-        [{ type: 'Swim', title: 'Pre-race impulse swim', duration: 30, distance: '1800m', system: 'Aerobic', detail: 'Short race-pace bursts + cool down' }, { type: 'Cycling', title: 'Pre-race impulse cycling', duration: 45, distance: '15 mi', system: 'Aerobic', detail: 'Spin + 3x short race-pace efforts' }],
-        [{ type: 'Other', title: 'Travel to The Woodlands', duration: 0, distance: '', system: 'Rest', detail: 'Day off · travel · bike check-in' }],
-        [{ type: 'Run', title: 'Race course shake-out', duration: 20, distance: '2 mi', system: 'Aerobic', detail: 'Very easy · mental prep' }, { type: 'Swim', title: 'Pre-race impulse swim', duration: 20, distance: '1000m', system: 'Aerobic', detail: 'Course familiarization' }],
-        [{ type: 'Cycling', title: 'Pre-race impulse cycling', duration: 30, distance: '10 mi', system: 'Aerobic', detail: 'Last bike spin · check gears' }],
-        [{ type: 'Other', title: 'Rest · bike drop-off', duration: 0, distance: '', system: 'Rest', detail: 'Hydrate · early bedtime · trust the work' }],
-        [{ type: 'IRONMAN', title: 'IRONMAN TEXAS 2027', duration: 720, distance: '140.6 mi', system: 'Race', detail: 'Swim 2.4mi → Bike 112mi → Run 26.2mi' }],
-      ];
-      return raceWeek[dayOfWeek];
+      // Sun Apr 18 → Sat Apr 24 (race day). Work-window checks are skipped this week.
+      return [
+        [R({ title: 'Easy shake-out run', duration: 40, distance: '4 mi', slot: 'AM', detail: 'Zone 1–2 · 4x30s strides · stay loose' })],
+        [C({ title: 'Pre-race impulse ride', duration: 45, distance: '15 mi', slot: 'AM', tag: 'Kickr', detail: 'Spin + 3x2 min at race pace' }),
+         S({ title: 'Pre-race impulse swim', duration: 30, distance: '1500m', slot: 'PM', detail: 'Short race-pace bursts + easy' })],
+        [S({ title: 'Easy swim', duration: 30, distance: '1200m', slot: 'AM', tag: 'EOS / OWS', detail: 'Feel for the water · nothing hard' })],
+        [OFF('Travel to The Woodlands', 'Day off · travel · hydrate · athlete check-in')],
+        [R({ title: 'Race course shake-out', duration: 20, distance: '2 mi', slot: 'AM', detail: 'Very easy · mental prep' }),
+         S({ title: 'Practice swim', duration: 20, distance: '1000m', slot: 'AM', detail: 'Course familiarization · sighting' })],
+        [C({ title: 'Last spin · bike drop-off', duration: 30, distance: '10 mi', slot: 'AM', detail: 'Check gears · drop bike · early bedtime' })],
+        [{ type: 'IRONMAN', title: 'IRONMAN TEXAS 2027', duration: 720, distance: '140.6 mi', system: 'Race', slot: 'AM', detail: 'Swim 2.4mi → Bike 112mi → Run 26.2mi · trust the work' }],
+      ][dayOfWeek];
     }
+
     if (phase === 'TAPER') {
-      const taper = [
-        [{ type: 'Strength', title: 'Light strength maintenance', duration: 30, distance: '', system: 'Aerobic', detail: 'Bodyweight + mobility only · no load' }],
-        [{ type: 'Run', title: 'Taper tempo', duration: 45, distance: '5 mi', system: 'Aerobic', detail: '3x 1mi at race pace · short recovery' }],
-        [{ type: 'Swim', title: 'Aerobic swim with short splits', duration: 60, distance: '2000m', system: 'Aerobic', detail: '400 WU · 10x100 moderate · 400 CD' }],
-        [{ type: 'Cycling', title: 'Short tempo ride', duration: 60, distance: '18 mi', system: 'Aerobic', detail: '3x 5min at race pace · 3min easy between' }],
-        [{ type: 'Other', title: 'Full rest day', duration: 0, distance: '', system: 'Rest', detail: 'Mobility only · foam roll · sleep' }],
-        [{ type: 'Cycling', title: 'Easy aerobic ride', duration: 60, distance: '18 mi', system: 'Aerobic', detail: 'Zone 2 · sharpening legs' }, { type: 'Run', title: 'Short brick run', duration: 15, distance: '2 mi', system: 'Aerobic', detail: 'Right off the bike · race pace' }],
-        [{ type: 'Run', title: 'LSD Taper', duration: 60, distance: '7 mi', system: 'Aerobic', detail: 'Easy Zone 2 · no pace focus' }],
-      ];
-      return taper[dayOfWeek];
+      return [
+        [R({ title: 'Taper long run', duration: 75, distance: '8 mi', slot: 'AM', detail: 'Zone 2 · 3x8 min at IM pace · soft surface' })],
+        [C({ title: 'Taper ride', duration: 120, distance: '36 mi', slot: 'AM', detail: '2x20 min at IM power · final gear + fit check' }),
+         R({ title: 'Brick run', duration: 20, distance: '2.5 mi', slot: 'AM', tag: 'Brick', detail: 'Right off the bike · IM pace · smooth' }),
+         ST({ title: 'Mobility + activation', duration: 20, slot: 'PM', detail: 'Hips · calves · balance · no load · no plyos' })],
+        [S({ title: 'Race-pace swim', duration: 45, distance: '2000m', slot: 'AM', tag: 'EOS / OWS', detail: '6x200 at race pace · sight every 6 strokes' })],
+        [R({ title: 'Taper tempo', duration: 45, distance: '5 mi', slot: 'PM', system: 'Anaerobic', detail: '3x5 min at IM pace · 2 min easy' })],
+        [S({ title: 'Easy swim', duration: 30, distance: '1200m', slot: 'AM', tag: 'Club / OWS', detail: 'Technique only' })],
+        [ST({ title: 'Activation only', duration: 20, slot: 'PM', detail: 'Band work · single-leg balance · no plyos · no load' })],
+        [C({ title: 'Kickr openers', duration: 60, distance: '18 mi', slot: 'PM', tag: 'Kickr', detail: '3x3 min at race pace · otherwise easy' }),
+         R({ title: 'Short brick', duration: 15, distance: '1.5 mi', slot: 'PM', tag: 'Brick', detail: 'Easy · form check' })],
+      ][dayOfWeek];
     }
+
     if (phase === 'PEAK') {
-      const peak = [
-        [{ type: 'Other', title: 'Active recovery', duration: 30, distance: '', system: 'Rest', detail: 'Walk · mobility · foam roll' }, { type: 'Strength', title: 'Morning Strength', duration: 45, distance: '', system: 'Aerobic', detail: 'Full body · endurance focus' }],
-        [{ type: 'Run', title: 'TAC 3x1600 ZONE 4', duration: 75, distance: '8.5 mi', system: 'Anaerobic', detail: 'WU 2mi + 3x1600m @ 10k pace (4min rest) + CD' }, { type: 'Strength', title: 'Afternoon Strength', duration: 30, distance: '', system: 'Aerobic', detail: 'Core + single-leg stability' }],
-        [{ type: 'Cycling', title: 'Cycling ANT (in watts)', duration: 180, distance: '55 mi', system: 'Aerobic', detail: 'Long aerobic build · power @ 55-34-21 structure' }, { type: 'Swim', title: 'Anaerobic swim long pause', duration: 60, distance: '2000m', system: 'Anaerobic', detail: '13x100, 2x200 · 2.5min pause' }],
-        [{ type: 'Run', title: '20km at half marathon pace', duration: 95, distance: '12.4 mi', system: 'Anaerobic', detail: '10min WU + 10km @ HM pace + 5km easy + CD' }, { type: 'Swim', title: 'Swim Training of Aerobic Capacity', duration: 60, distance: '2400m', system: 'Aerobic', detail: 'TAC 2x400 (5min rest)' }],
-        [{ type: 'Strength', title: 'Strength maintenance', duration: 30, distance: '', system: 'Aerobic', detail: '15 min strengthening program' }, { type: 'Cycling', title: 'Easy spin', duration: 60, distance: '15 mi', system: 'Aerobic', detail: 'Recovery zone · keep legs moving' }],
-        [{ type: 'Cycling', title: '90km Cycling before IRONMAN', duration: 180, distance: '56 mi', system: 'Aerobic', detail: 'Long ride at race pace · race nutrition practice' }, { type: 'Run', title: 'Short brick run', duration: 35, distance: '4 mi', system: 'Anaerobic', detail: '35 minutes run after BIKE · race pace' }],
-        [{ type: 'Run', title: 'LSD Long Run', duration: 150, distance: '17 mi', system: 'Aerobic', detail: 'Long steady distance · practice race nutrition' }, { type: 'Swim', title: 'OWS as recovery', duration: 45, distance: '2100m', system: 'Aerobic', detail: 'Open water easy · 3x1000m continuous' }],
-      ];
-      return peak[dayOfWeek];
+      return [
+        [R({ title: 'Long run · race rehearsal', duration: 160, distance: '17 mi', slot: 'AM', detail: 'Zone 2 · full race nutrition · last 30 min at IM pace' }),
+         S({ title: 'OPTIONAL easy OWS', duration: 40, distance: '1800m', slot: 'PM', optional: true, tag: 'OWS', detail: 'Flush the legs · easy continuous' })],
+        [C({ title: 'Long ride · IM power', duration: 240, distance: '75 mi', slot: 'AM', detail: '3x40 min at IM power · full nutrition rehearsal · race kit' }),
+         R({ title: 'Brick run · IM pace', duration: 50, distance: '6 mi', slot: 'AM', tag: 'Brick', system: 'Anaerobic', detail: 'Hold form on tired legs · even splits' }),
+         ST({ title: 'Stability + mobility', duration: 20, slot: 'PM', detail: 'Hip abductors · calf raises · single-leg balance · no plyos' })],
+        [S({ title: 'Race-pace swim', duration: 60, distance: '2800m', slot: 'AM', tag: 'EOS / OWS', detail: '3x800 at race pace · sighting · wetsuit if OWS' })],
+        [R({ title: 'IM race-pace run', duration: 60, distance: '7 mi', slot: 'PM', system: 'Anaerobic', detail: '10 min WU · 40 min at IM pace · 10 min CD' }),
+         ST({ title: 'Core', duration: 15, slot: 'PM', detail: 'Anti-rotation · dead bugs · side plank' })],
+        [S({ title: 'Easy swim', duration: 40, distance: '1800m', slot: 'AM', tag: 'Club / OWS', detail: '8x100 moderate · easy' })],
+        [ST({ title: 'Single-leg strength · light', duration: 30, slot: 'PM', tag: 'Low plyo', detail: 'Split squats · step-downs · SL RDL · pogo hops 2x15 only' })],
+        [C({ title: 'Kickr · IM power', duration: 90, distance: '27 mi', slot: 'PM', tag: 'Kickr', detail: '3x15 min at IM power · 5 min easy' }),
+         R({ title: 'Brick run', duration: 20, distance: '2.5 mi', slot: 'PM', tag: 'Brick', detail: 'Easy to steady' })],
+      ][dayOfWeek];
     }
+
     if (phase === 'RECOVERY') {
-      const recovery = [
-        [{ type: 'Other', title: 'Full recovery day', duration: 0, distance: '', system: 'Rest', detail: 'Mobility + foam roll only' }],
-        [{ type: 'Run', title: 'Recovery Running', duration: 30, distance: '3 mi', system: 'Aerobic', detail: 'Zone 1 · very easy' }, { type: 'Strength', title: 'Strength maintenance', duration: 15, distance: '', system: 'Aerobic', detail: '15 min strengthening program' }],
-        [{ type: 'Swim', title: 'Recovery swimming', duration: 30, distance: '1500m', system: 'Aerobic', detail: 'Easy technique-focused swim' }],
-        [{ type: 'Cycling', title: '60 min aerobic cycling as recovery', duration: 60, distance: '15 mi', system: 'Aerobic', detail: 'Zone 1-2 · flat or rolling terrain' }],
-        [{ type: 'Strength', title: 'Morning Strength', duration: 45, distance: '', system: 'Aerobic', detail: 'Full body · strength maintenance' }],
-        [{ type: 'Cycling', title: 'Fartlek cycling', duration: 75, distance: '22 mi', system: 'Anaerobic', detail: '6x2min @ ZONE 3 with 3min easy' }],
-        [{ type: 'Run', title: 'LSD run', duration: 80, distance: '9 mi', system: 'Aerobic', detail: 'Easy long run · Zone 2 only' }, { type: 'Swim', title: 'Recovery swim', duration: 30, distance: '1500m', system: 'Aerobic', detail: 'Technique · easy' }],
-      ];
-      return recovery[dayOfWeek];
+      return [
+        [R({ title: 'Easy long run', duration: 60, distance: '6.5 mi', slot: 'AM', detail: 'Zone 1–2 · soft surface · no pace' })],
+        [C({ title: 'Easy ride', duration: 90, distance: '27 mi', slot: 'AM', tag: 'Kickr OK', detail: 'Zone 1–2 · flat · spin' }),
+         R({ title: 'Short brick', duration: 15, distance: '1.5 mi', slot: 'AM', tag: 'Brick', detail: 'Easy · form only' }),
+         ST({ title: 'Mobility', duration: 20, slot: 'PM', detail: 'Foam roll · hips · calves · balance' })],
+        [S({ title: 'Recovery swim', duration: 40, distance: '1600m', slot: 'AM', tag: 'EOS / OWS', detail: 'Easy · technique · drills' })],
+        [R({ title: 'Recovery run', duration: 40, distance: '4.5 mi', slot: 'PM', detail: 'Zone 1 · very easy' })],
+        [OFF('Full rest day', 'Sleep · hydrate · nothing')],
+        [ST({ title: 'Single-leg strength · light', duration: 30, slot: 'PM', detail: 'Reduced load · no plyos this week' })],
+        [C({ title: 'Easy Kickr spin', duration: 60, distance: '18 mi', slot: 'PM', tag: 'Kickr', detail: 'Zone 1–2 · cadence drills' })],
+      ][dayOfWeek];
     }
+
     if (phase === 'BUILD') {
-      const build = [
-        [{ type: 'Strength', title: 'Morning Strength', duration: 50, distance: '', system: 'Aerobic', detail: 'Full body · progressive load' }, { type: 'Swim', title: 'Aerobic Pyramid 1 km', duration: 60, distance: '1500m', system: 'Aerobic', detail: 'Pyramid set: 50-100-200-300-200-100-50' }],
-        [{ type: 'Run', title: 'Anaerobic tempo running 15+10', duration: 55, distance: '6 mi', system: 'Anaerobic', detail: 'WU + 15min @ threshold + 10min @ threshold + CD' }, { type: 'Strength', title: 'Strengthening program', duration: 15, distance: '', system: 'Aerobic', detail: 'Core focus' }],
-        [{ type: 'Cycling', title: 'Cycling ANT (in watts)', duration: 120, distance: '35 mi', system: 'Aerobic', detail: 'Power zones 55-34-21 · aerobic focus' }, { type: 'Swim', title: 'Aerobic swim', duration: 60, distance: '2000m', system: 'Aerobic', detail: '20x50 + 10x100 · moderate pace' }],
-        [{ type: 'Run', title: 'TAC 2x1 mile ZONE4', duration: 75, distance: '8 mi', system: 'Anaerobic', detail: 'WU + 2x1mi @ 5k pace (3min rest) + CD' }, { type: 'Strength', title: 'Afternoon Strength', duration: 30, distance: '', system: 'Aerobic', detail: 'Upper body + core' }],
-        [{ type: 'Strength', title: 'Morning Strength', duration: 45, distance: '', system: 'Aerobic', detail: 'Full body · maintenance' }, { type: 'Cycling', title: 'Easy aerobic cycling', duration: 60, distance: '17 mi', system: 'Aerobic', detail: 'Zone 2 · active recovery' }],
-        [{ type: 'Cycling', title: 'Long aerobic cycling', duration: 150, distance: '45 mi', system: 'Aerobic', detail: 'Long Zone 2 ride · race nutrition practice' }, { type: 'Run', title: '35 minutes run after BIKE', duration: 35, distance: '4 mi', system: 'Anaerobic', detail: 'Brick run · Zone 3 · race pace' }],
-        [{ type: 'Run', title: 'LSD run from low to high ZONE 2', duration: 110, distance: '12.5 mi', system: 'Aerobic', detail: 'Long progressive run · finish strong' }, { type: 'Swim', title: 'OPTIONAL OWS', duration: 45, distance: '2000m', system: 'Aerobic', detail: 'Open water continuous · weather permitting' }],
-      ];
-      return build[dayOfWeek];
+      return [
+        [R({ title: 'Long run · fast finish', duration: 120, distance: '13 mi', slot: 'AM', detail: 'Zone 2 · last 20 min at IM pace · soft surface · nutrition practice' }),
+         S({ title: 'OPTIONAL easy OWS', duration: 40, distance: '1800m', slot: 'PM', optional: true, tag: 'OWS', detail: 'Easy continuous · skip if legs are flat' })],
+        [C({ title: 'Long ride · IM blocks', duration: 180, distance: '55 mi', slot: 'AM', tag: 'Kickr OK', detail: 'Zone 2 · 3x20 min at IM power · race nutrition' }),
+         R({ title: 'Brick run · IM pace', duration: 30, distance: '3.5 mi', slot: 'AM', tag: 'Brick', system: 'Anaerobic', detail: 'Right off the bike · IM pace · quick feet' }),
+         ST({ title: 'Stability + mobility', duration: 25, slot: 'PM', detail: 'Hip abductors · calf · single-leg balance · no plyos' })],
+        [S({ title: 'Aerobic swim', duration: 60, distance: '2400m', slot: 'AM', tag: 'EOS / OWS', detail: '4x400 aerobic · pull + paddles · sighting if OWS' })],
+        [R({ title: 'Tempo run', duration: 60, distance: '7 mi', slot: 'PM', system: 'Anaerobic', detail: '2x15 min at HM–IM pace · 3 min easy between' }),
+         ST({ title: 'Core', duration: 15, slot: 'PM', detail: 'Anti-rotation · dead bugs · side plank' })],
+        [S({ title: 'Easy swim', duration: 40, distance: '1800m', slot: 'AM', tag: 'Club / OWS', detail: '8x100 moderate · easy · technique' })],
+        [ST({ title: 'Single-leg strength + plyos', duration: 40, slot: 'PM', tag: 'Plyos', detail: 'Split squats · step-downs · SL RDL · lateral hops · pogo hops · right-leg focus' })],
+        [C({ title: 'Kickr threshold', duration: 90, distance: '27 mi', slot: 'PM', tag: 'Kickr', system: 'Anaerobic', detail: '4x10 min at threshold · 5 min easy' }),
+         R({ title: 'Brick run', duration: 20, distance: '2.5 mi', slot: 'PM', tag: 'Brick', detail: 'Easy to steady' })],
+      ][dayOfWeek];
     }
-    if (phase === 'BASE') {
-      const base = [
-        [{ type: 'Yoga', title: 'Preferred day of mobility and Yoga', duration: 30, distance: '', system: 'Aerobic', detail: 'Full recovery · mobility focus' }],
-        [{ type: 'Run', title: 'Anaerobic tempo running 20+15', duration: 55, distance: '6 mi', system: 'Anaerobic', detail: '20min @ tempo + 15min @ threshold' }, { type: 'Strength', title: 'Strengthening program', duration: 30, distance: '', system: 'Aerobic', detail: '30 min strength program' }],
-        [{ type: 'Cycling', title: 'Fartlek cycling-60 min', duration: 60, distance: '17 mi', system: 'Anaerobic', detail: 'Mixed intervals · varied intensity' }, { type: 'Swim', title: 'Aerobic Swim 2km', duration: 60, distance: '2000m', system: 'Aerobic', detail: '21x50 at aerobic pace' }],
-        [{ type: 'Run', title: 'Run from low to high ZONE 2', duration: 60, distance: '7 mi', system: 'Aerobic', detail: '8km progressive · Zone 2 build' }, { type: 'Strength', title: 'Core + stability', duration: 15, distance: '', system: 'Aerobic', detail: 'Core focus' }],
-        [{ type: 'Strength', title: 'Morning Strength', duration: 40, distance: '', system: 'Aerobic', detail: 'Full body' }],
-        [{ type: 'Cycling', title: 'Long aerobic cycling', duration: 120, distance: '35 mi', system: 'Aerobic', detail: 'Long Zone 2 · aerobic base build' }, { type: 'Strength', title: '15 min strengthening', duration: 15, distance: '', system: 'Aerobic', detail: 'Quick post-ride' }],
-        [{ type: 'Run', title: 'LSD run', duration: 90, distance: '10 mi', system: 'Aerobic', detail: 'Long steady distance · Zone 2' }, { type: 'Swim', title: 'OPTIONAL recovery swim', duration: 30, distance: '1500m', system: 'Aerobic', detail: 'Easy technique swim' }],
-      ];
-      return base[dayOfWeek];
-    }
-    const foundation = [
-      [{ type: 'Yoga', title: 'Mobility + Yoga', duration: 30, distance: '', system: 'Aerobic', detail: 'Hip openers + thoracic mobility' }],
-      [{ type: 'Run', title: 'Aerobic run', duration: 45, distance: '5 mi', system: 'Aerobic', detail: 'Easy Zone 2 · form focus' }, { type: 'Strength', title: 'Strengthening program', duration: 30, distance: '', system: 'Aerobic', detail: 'Full body · moderate load' }],
-      [{ type: 'Swim', title: 'Aerobic swim', duration: 45, distance: '1800m', system: 'Aerobic', detail: '15x100 at aerobic pace' }, { type: 'Cycling', title: 'Easy cycling', duration: 60, distance: '15 mi', system: 'Aerobic', detail: 'Zone 1-2 · form and cadence' }],
-      [{ type: 'Run', title: 'Zone 2 fartlek', duration: 50, distance: '5.5 mi', system: 'Aerobic', detail: '10km run with small pickups' }],
-      [{ type: 'Strength', title: 'Morning Strength', duration: 45, distance: '', system: 'Aerobic', detail: 'Full body strength program' }],
-      [{ type: 'Cycling', title: 'Aerobic cycling', duration: 90, distance: '25 mi', system: 'Aerobic', detail: 'Zone 2 base ride' }],
-      [{ type: 'Run', title: 'LSD run from low to high ZONE 2', duration: 60, distance: '7 mi', system: 'Aerobic', detail: 'Long Zone 2 · easy pace' }],
-    ];
-    return foundation[dayOfWeek];
+
+    // BASE (FOUNDATION falls through to the same template)
+    return [
+      [R({ title: 'Long run', duration: 75, distance: '8 mi', slot: 'AM', detail: 'Zone 2 · soft surface where possible · relaxed' }),
+       S({ title: 'OPTIONAL easy OWS', duration: 30, distance: '1200m', slot: 'PM', optional: true, tag: 'OWS', detail: 'Easy · bay swim if conditions allow' })],
+      [C({ title: 'Long ride', duration: 120, distance: '35 mi', slot: 'AM', tag: 'Kickr OK', detail: 'Zone 2 · steady cadence · Kickr until the fit is done' }),
+       R({ title: 'Brick run', duration: 15, distance: '1.5 mi', slot: 'AM', tag: 'Brick', detail: 'Right off the bike · easy · find your legs' }),
+       ST({ title: 'Stability + mobility', duration: 25, slot: 'PM', detail: 'Hip abductors · calf · single-leg balance · no plyos' })],
+      [S({ title: 'Aerobic swim', duration: 50, distance: '2000m', slot: 'AM', tag: 'EOS / OWS', detail: '10x100 aerobic + drills · technique focus' })],
+      [R({ title: 'Steady run', duration: 50, distance: '5.5 mi', slot: 'PM', detail: 'Zone 2 · last 10 min low Zone 3 · relaxed form' }),
+       ST({ title: 'Core', duration: 15, slot: 'PM', detail: 'Anti-rotation · dead bugs · side plank' })],
+      [S({ title: 'Easy swim', duration: 35, distance: '1500m', slot: 'AM', tag: 'Club / OWS', detail: 'Technique · easy · short' })],
+      [ST({ title: 'Single-leg strength + plyos', duration: 40, slot: 'PM', tag: 'Plyos', detail: 'Split squats · step-downs · SL RDL · lateral hops · pogo hops · right-leg focus' })],
+      [C({ title: 'Kickr sweet spot', duration: 60, distance: '18 mi', slot: 'PM', tag: 'Kickr', detail: '3x8 min sweet spot · 4 min easy' })],
+    ][dayOfWeek];
   };
 
   const plan = useMemo(() => {
@@ -208,16 +254,18 @@ export default function RoadToTexasSite() {
     for (let i = 0; i < totalWeeks; i++) {
       const weekStartDay = PLAN_START_DAY + (i * 7);
       const weeksUntilRace = totalWeeks - i - 1;
-      const phase = getPhase(weeksUntilRace);
+      const phase = getPhase(weeksUntilRace, i);
       const phaseDetail = getPhaseDetail(phase);
 
       const days = [];
       let totalHours = 0, totalRun = 0, totalBike = 0, totalSwim = 0;
       for (let d = 0; d < 7; d++) {
-        const dayWorkouts = generateDayWorkouts(phase, weeksUntilRace, d);
+        const weekday = (SCHEDULE.weekStartsOn + d) % 7;
+        const dayWorkouts = generateDayWorkouts(phase, weeksUntilRace, weekday);
         const dayNum = weekStartDay + d;
-        days.push({ dayNum, workouts: dayWorkouts });
+        days.push({ dayNum, weekday, workouts: dayWorkouts });
         dayWorkouts.forEach(w => {
+          if (w.optional) return; // optional sessions don't count toward planned load
           totalHours += w.duration / 60;
           if (w.type === 'Run') totalRun += parseFloat(w.distance) || 0;
           if (w.type === 'Cycling') totalBike += parseFloat(w.distance) || 0;
@@ -231,7 +279,7 @@ export default function RoadToTexasSite() {
         weekStartDay,
         phase,
         phaseDetail,
-        hours: Math.round(totalHours),
+        hours: Math.round(totalHours * 10) / 10,
         runMi: Math.round(totalRun),
         bikeMi: Math.round(totalBike),
         swimMi: Math.round(totalSwim * 10) / 10,
@@ -253,7 +301,6 @@ export default function RoadToTexasSite() {
   const effectiveSelectedWeek = selectedWeek !== null ? selectedWeek : currentWeekIndex;
   const effectiveCalendarWeek = calendarWeek !== null ? calendarWeek : currentWeekIndex;
 
-  const weeksToRace = plan.length - 1;
   const daysToRace = todayDay === null ? (RACE_DAY_NUM - PLAN_START_DAY) : Math.max(0, RACE_DAY_NUM - todayDay);
   const currentWeek = plan[effectiveSelectedWeek];
   const currentCalendarWeek = plan[effectiveCalendarWeek];
@@ -302,8 +349,23 @@ export default function RoadToTexasSite() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const dayNamesLong = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const GOLD = '#ffd700';
+
+  // Over-window check: sum non-optional minutes per slot vs SCHEDULE caps. Skipped in race week.
+  const windowIssues = (day, phase) => {
+    if (phase === 'RACE WEEK') return [];
+    const caps = SCHEDULE.days[day.weekday].caps;
+    const used = { AM: 0, PM: 0 };
+    day.workouts.forEach(w => { if (!w.optional && w.slot) used[w.slot] += w.duration; });
+    return ['AM', 'PM'].filter(slot => used[slot] > caps[slot]).map(slot => ({ slot, over: used[slot] - caps[slot] }));
+  };
+
+  const milestonesOn = (dayNum) => MILESTONES.filter(m => m.date && dayNumFromYMD(m.date.y, m.date.m, m.date.d) === dayNum);
+  const formatMilestoneDate = (m) => m.date ? formatDayNum(dayNumFromYMD(m.date.y, m.date.m, m.date.d)) : 'TBD';
+
+  const maxHours = Math.max(...plan.map(w => w.hours), 1);
+  const maxRunMi = Math.max(...plan.map(w => w.runMi), 1);
   const TEXAS_RED = '#c8102e';
 
   return (
@@ -373,6 +435,44 @@ export default function RoadToTexasSite() {
           font-weight: 700; animation: todayPulse 2s infinite; border-radius: 2px;
         }
 
+        .day-col.free-day { background: rgba(90, 143, 212, 0.05); }
+        .day-col.work-day { background: #050814; }
+        .day-col.heavy-day { background: rgba(5, 8, 20, 1); }
+        .sched-chip {
+          display: inline-block; padding: 2px 6px; border-radius: 2px;
+          font-family: 'JetBrains Mono', monospace; font-size: 8px;
+          letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600;
+        }
+        .sched-free { background: rgba(90, 143, 212, 0.18); color: #5a8fd4; }
+        .sched-work { background: rgba(245, 247, 255, 0.06); color: rgba(245, 247, 255, 0.45); }
+        .sched-heavy { background: rgba(200, 16, 46, 0.14); color: #e07a8a; }
+        .slot-chip {
+          font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 0.1em;
+          padding: 2px 6px; background: rgba(245, 247, 255, 0.06); color: rgba(245, 247, 255, 0.7);
+          font-weight: 600; white-space: nowrap;
+        }
+        .tag-chip {
+          display: inline-block; margin-top: 4px; padding: 1px 6px;
+          font-family: 'JetBrains Mono', monospace; font-size: 8px; letter-spacing: 0.1em;
+          text-transform: uppercase; border: 1px solid rgba(90, 143, 212, 0.35); color: #5a8fd4;
+        }
+        .fit-warn {
+          margin-top: 8px; padding: 4px 8px;
+          font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: 0.08em;
+          background: rgba(255, 215, 0, 0.1); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.35);
+        }
+        .run-cue {
+          margin-top: 6px; font-family: 'JetBrains Mono', monospace; font-size: 9px;
+          letter-spacing: 0.08em; color: #e07a8a; text-transform: uppercase;
+        }
+        .workout-card.optional { border-style: dashed !important; opacity: 0.7; }
+        .milestone-card { border-left-color: #ffd700 !important; background: rgba(255, 215, 0, 0.06) !important; }
+        .milestone-row {
+          display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center;
+          padding: 14px 18px; margin-bottom: 28px;
+          border: 1px solid rgba(255, 215, 0, 0.25); background: rgba(255, 215, 0, 0.04);
+        }
+
         /* ========== MOBILE RESPONSIVE ========== */
         .nav-bar { padding: 20px 40px; }
         .section-pad { padding: 80px 40px; }
@@ -383,9 +483,11 @@ export default function RoadToTexasSite() {
 
         .calendar-grid {
           display: grid;
-          grid-template-columns: repeat(7, 1fr);
+          grid-template-columns: repeat(7, minmax(0, 1fr));
           gap: 2px;
         }
+        .day-col { min-width: 0; }
+        .workout-card { min-width: 0; }
         .overview-card {
           display: grid;
           grid-template-columns: 1fr 2fr;
@@ -675,8 +777,25 @@ export default function RoadToTexasSite() {
             max={plan.length - 1}
             value={effectiveCalendarWeek}
             onChange={(e) => setCalendarWeek(Number(e.target.value))}
-            style={{ width: '100%', marginBottom: '28px', accentColor: '#5a8fd4' }}
+            style={{ width: '100%', marginBottom: '20px', accentColor: '#5a8fd4' }}
           />
+
+          {MILESTONES.length > 0 && (
+            <div className="milestone-row">
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: '9px',
+                letterSpacing: '0.2em', color: GOLD, textTransform: 'uppercase', fontWeight: 700,
+              }}>Milestones</span>
+              {MILESTONES.map((m, i) => (
+                <span key={i} style={{ fontFamily: "'Archivo', sans-serif", fontSize: '12px', color: 'rgba(245, 247, 255, 0.75)' }}>
+                  <span style={{ color: workoutTypeColor(m.type), fontWeight: 600 }}>{m.title}</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: 'rgba(245, 247, 255, 0.45)', marginLeft: '8px' }}>
+                    {formatMilestoneDate(m)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="calendar-grid" style={{
             background: 'rgba(90, 143, 212, 0.15)',
@@ -684,9 +803,14 @@ export default function RoadToTexasSite() {
           }}>
             {currentCalendarWeek.days.map((day, i) => {
               const isToday = i === todayIndex;
+              const sched = SCHEDULE.days[day.weekday];
+              const dayClass = sched.heavy ? 'heavy-day' : (sched.work ? 'work-day' : 'free-day');
+              const schedClass = sched.heavy ? 'sched-heavy' : (sched.work ? 'sched-work' : 'sched-free');
+              const issues = windowIssues(day, currentCalendarWeek.phase);
+              const dayMilestones = milestonesOn(day.dayNum);
               return (
-                <div key={i} className="day-col" style={{
-                  background: isToday ? 'rgba(200, 16, 46, 0.08)' : '#050814',
+                <div key={i} className={`day-col ${dayClass}`} style={{
+                  background: isToday ? 'rgba(200, 16, 46, 0.08)' : undefined,
                   padding: '20px 16px',
                   minHeight: '400px',
                   display: 'flex', flexDirection: 'column',
@@ -702,30 +826,49 @@ export default function RoadToTexasSite() {
                         fontSize: '16px', letterSpacing: '0.1em',
                         color: isToday ? TEXAS_RED : '#f5f7ff',
                       }}>
-                        {dayNames[i]}
+                        {WEEKDAY_NAMES[day.weekday]}
                       </div>
-                      {isToday && <span className="today-badge">Today</span>}
+                      {isToday ? <span className="today-badge">Today</span> : <span className={`sched-chip ${schedClass}`}>{sched.label}</span>}
                     </div>
                     <div style={{
                       fontFamily: "'JetBrains Mono', monospace", fontSize: '11px',
                       color: 'rgba(245, 247, 255, 0.5)', letterSpacing: '0.1em', marginTop: '2px',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px',
                     }}>
-                      {formatDayNum(day.dayNum)}
+                      <span>{formatDayNum(day.dayNum)}</span>
+                      {isToday && <span className={`sched-chip ${schedClass}`}>{sched.label}</span>}
                     </div>
+                    {issues.map(iss => (
+                      <div key={iss.slot} className="fit-warn">⚠ {iss.slot} over window by {iss.over} min</div>
+                    ))}
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
+                    {dayMilestones.map((m, mi) => (
+                      <div key={`m${mi}`} className="workout-card milestone-card" style={{
+                        padding: '12px 14px',
+                        border: `1px solid rgba(255, 215, 0, 0.3)`,
+                        borderLeft: `3px solid ${GOLD}`,
+                      }}>
+                        <div style={{
+                          fontFamily: "'Archivo Black', sans-serif", fontSize: '11px',
+                          color: GOLD, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '6px',
+                        }}>Milestone</div>
+                        <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: '13px', fontWeight: 600, color: '#f5f7ff', lineHeight: 1.3, marginBottom: '4px' }}>{m.title}</div>
+                        <div style={{ fontFamily: "'Archivo', sans-serif", fontSize: '11px', color: 'rgba(245, 247, 255, 0.55)', lineHeight: 1.4 }}>{m.detail}</div>
+                      </div>
+                    ))}
                     {day.workouts.map((w, wi) => {
                       const badge = systemBadge(w.system);
                       return (
-                        <div key={wi} className="workout-card" style={{
+                        <div key={wi} className={`workout-card${w.optional ? ' optional' : ''}`} style={{
                           padding: '12px 14px',
                           background: 'rgba(90, 143, 212, 0.05)',
                           border: `1px solid rgba(90, 143, 212, 0.15)`,
                           borderLeft: `3px solid ${workoutTypeColor(w.type)}`,
                         }}>
                           <div style={{
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', gap: '6px', flexWrap: 'wrap',
                           }}>
                             <div style={{
                               fontFamily: "'Archivo Black', sans-serif", fontSize: '11px',
@@ -733,12 +876,17 @@ export default function RoadToTexasSite() {
                             }}>
                               {w.type}
                             </div>
-                            <div style={{
-                              fontFamily: "'JetBrains Mono', monospace", fontSize: '8px',
-                              padding: '2px 6px', background: badge.bg, color: badge.color,
-                              letterSpacing: '0.1em', fontWeight: 600,
-                            }}>
-                              {badge.label}
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              {w.slot && w.duration > 0 && (
+                                <span className="slot-chip">{w.slot} · {SCHEDULE.slotTimes[w.slot]}</span>
+                              )}
+                              <div style={{
+                                fontFamily: "'JetBrains Mono', monospace", fontSize: '8px',
+                                padding: '2px 6px', background: badge.bg, color: badge.color,
+                                letterSpacing: '0.1em', fontWeight: 600,
+                              }}>
+                                {badge.label}
+                              </div>
                             </div>
                           </div>
                           <div style={{
@@ -760,6 +908,8 @@ export default function RoadToTexasSite() {
                           }}>
                             {w.detail}
                           </div>
+                          {w.tag && <span className="tag-chip">{w.tag}</span>}
+                          {w.type === 'Run' && ATHLETE.runCue && <div className="run-cue">↔ {ATHLETE.runCue}</div>}
                         </div>
                       );
                     })}
@@ -773,7 +923,7 @@ export default function RoadToTexasSite() {
             display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '24px',
             paddingTop: '20px', borderTop: '1px solid rgba(90, 143, 212, 0.15)',
           }}>
-            {['Run', 'Cycling', 'Swim', 'Strength', 'Yoga', 'Other'].map(t => (
+            {['Run', 'Cycling', 'Swim', 'Strength', 'Other'].map(t => (
               <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <div style={{ width: '14px', height: '14px', background: workoutTypeColor(t) }} />
                 <span style={{
@@ -782,6 +932,19 @@ export default function RoadToTexasSite() {
                 }}>{t}</span>
               </div>
             ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '14px', height: '14px', background: GOLD }} />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', letterSpacing: '0.15em', color: 'rgba(245, 247, 255, 0.6)', textTransform: 'uppercase' }}>Milestone</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '14px', height: '14px', border: '1px dashed rgba(90, 143, 212, 0.6)' }} />
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', letterSpacing: '0.15em', color: 'rgba(245, 247, 255, 0.6)', textTransform: 'uppercase' }}>Optional · not counted</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="sched-chip sched-free">Free</span>
+              <span className="sched-chip sched-work">Work</span>
+              <span className="sched-chip sched-heavy">Heavy work</span>
+            </div>
           </div>
         </div>
       </section>
@@ -906,16 +1069,26 @@ export default function RoadToTexasSite() {
                     className="week-card"
                     onClick={() => setSelectedWeek(i)}
                     style={{
-                      flex: 1, minWidth: '6px',
-                      height: `${(w.hours / 24) * 100}%`, minHeight: '6px',
+                      flex: 1, minWidth: '6px', height: '100%',
+                      display: 'flex', alignItems: 'flex-end', gap: '1px',
+                    }}
+                    title={`Week ${w.weekNum} · ${w.phase} · ${w.hours}h · run ${w.runMi} mi${isCurrent ? ' · THIS WEEK' : ''}`}
+                  >
+                    <div style={{
+                      flex: 2,
+                      height: `${(w.hours / maxHours) * 100}%`, minHeight: '6px',
                       background: isSelected ? '#5a8fd4' : phaseColor(w.phase),
                       opacity: isSelected ? 1 : (isCurrent ? 0.9 : 0.55),
                       border: isSelected
                         ? '2px solid #f5f7ff'
                         : (isCurrent ? `2px solid ${TEXAS_RED}` : 'none'),
-                    }}
-                    title={`Week ${w.weekNum} · ${w.phase} · ${w.hours}h${isCurrent ? ' · THIS WEEK' : ''}`}
-                  />
+                    }} />
+                    <div style={{
+                      flex: 1,
+                      height: `${(w.runMi / maxRunMi) * 100}%`, minHeight: '3px',
+                      background: TEXAS_RED, opacity: isSelected ? 1 : 0.7,
+                    }} />
+                  </div>
                 );
               })}
             </div>
@@ -923,7 +1096,7 @@ export default function RoadToTexasSite() {
               display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '24px',
               paddingTop: '20px', borderTop: '1px solid rgba(90, 143, 212, 0.15)',
             }}>
-              {['FOUNDATION', 'BASE', 'BUILD', 'PEAK', 'TAPER', 'RACE WEEK', 'RECOVERY'].map(p => (
+              {['BASE', 'BUILD', 'PEAK', 'TAPER', 'RACE WEEK', 'RECOVERY'].map(p => (
                 <div key={p} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '14px', height: '14px', background: phaseColor(p) }} />
                   <span style={{
@@ -938,6 +1111,13 @@ export default function RoadToTexasSite() {
                   fontFamily: "'JetBrains Mono', monospace", fontSize: '10px',
                   letterSpacing: '0.15em', color: TEXAS_RED,
                 }}>THIS WEEK</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: '6px', height: '14px', background: TEXAS_RED, opacity: 0.7 }} />
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: '10px',
+                  letterSpacing: '0.15em', color: 'rgba(245, 247, 255, 0.6)',
+                }}>RUN MILES (thin bar)</span>
               </div>
             </div>
           </div>
@@ -957,7 +1137,7 @@ export default function RoadToTexasSite() {
           {[
             { label: 'Days to Race', value: daysToRace, isText: false },
             { label: 'Current Week', value: currentWeekIndex + 1, isText: false },
-            { label: 'Total Weeks', value: weeksToRace, isText: false },
+            { label: 'Total Weeks', value: plan.length, isText: false },
             { label: 'Current Phase', value: plan[currentWeekIndex].phase.split(' ')[0], isText: true },
           ].map((s, i) => (
             <div key={i} style={{ padding: '20px 12px', textAlign: 'center' }}>
